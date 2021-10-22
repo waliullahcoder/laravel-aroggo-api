@@ -35,7 +35,7 @@ Route::post('/admin/v1/auth/sms/verify/', [AuthController::class, 'adminSMSVerif
 Route::get('/{version}/data/initial/{table}/{page}/', [RouteResponseController::class, 'dataInitial']);//ok
 Route::get('/{version}/data/check/{dbVersion}/', [RouteResponseController::class, 'dataCheck']);//ok
 Route::get('/v1/home/', [RouteResponseController::class, 'home']);//ok
-// Route::get('/v2/home/', [RouteResponseController::class, 'home_v2']);
+// Route::get('/v2/home/', [RouteResponseController::class, 'home_v2']);//Main Problem
 //$rc->get( '/v1/medicines/[{search}/[{page:\d+}/]]', [ '\OA\RouteResponse', 'medicines' ] );
 Route::get('/v1/sameGeneric/{g_id}/{page}/', [RouteResponseController::class, 'sameGeneric']);//OK
 Route::get('/{version}/medicine/{m_id}/', [RouteResponseController::class, 'medicineSingle']);//Search//generic due
@@ -45,7 +45,7 @@ Route::get('/{version}/medicine/extra/{m_id}/', [RouteResponseController::class,
 Route::get('/v1/medicine/price/{m_id}/', [RouteResponseController::class, 'medicinePrice']); //ok
 Route::post('/v1/medicine/suggest/', [RouteResponseController::class, 'medicineSuggest']); //ok
 Route::post('/v1/token/', [RouteResponseController::class, 'token']);//ok
-Route::post('/v1/cart/details/', [RouteResponseController::class, 'cartDetails']);//check //done
+Route::post('/v1/cart/details/', [RouteResponseController::class, 'cartDetails']);//ok
 Route::post('/v1/discount/check/', [RouteResponseController::class, 'dicountCheck']);//check //updated but need testing
 
 Route::get('/v1/checkout/initiated/', [RouteResponseController::class, 'checkoutInitiated']);//ok
