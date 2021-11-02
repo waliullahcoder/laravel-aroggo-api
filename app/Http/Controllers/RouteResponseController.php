@@ -3,7 +3,9 @@
 namespace App\Http\Controllers;
 
 use App\Cache\Cache;
+use App\Models\CacheUpdate;
 use App\Models\GenericV1;
+use App\Models\PDF;
 use GuzzleHttp\Client;
 use Illuminate\Http\Request;
 use Carbon\Carbon;
@@ -24,7 +26,7 @@ use App\Models\Discount;
 use App\Models\Order;
 use App\Models\OMedicine;
 use App\Models\Log;
-//use App\Models\CacheUpdate;
+use App\Helpers\FPDF_Merge;
 use App\Helpers\Response;
 
 class RouteResponseController extends Controller
@@ -187,100 +189,265 @@ class RouteResponseController extends Controller
     }
 
 
-    // public function home_v2() {
-    //     $from = isset( $_GET['f'] ) ? preg_replace("/[^a-zA-Z0-9]+/", "",$_GET['f']) : 'app';
-    //     if ( $cache_data = Cache::instance()->get( $from, 'HomeData' ) ){
-    //         Response::instance()->replaceResponse( $cache_data );
-    //         Response::instance()->send();
-    //     }
-    //     Response::instance()->setResponse( 'refBonus', Functions::changableData('refBonus') );
-    //     Response::instance()->setResponse( 'versions', ['current' => '4.1.1', 'min' => '3.1.1'] );
-    //     $extraData = [
-    //         'yt_video' => [
-    //             'key' => 'zC4ejeR3sJo',
-    //             'title' => 'How to order from Arogga App',
-    //         ],
-    //         'banner1' => CDN_URL . '/eyJidWNrZXQiOiJhcm9nZ2EiLCJrZXkiOiJtaXNjXC9ob21lQmFubmVyLmpwZWcifQ==',
-    //     ];
-    //     Response::instance()->setResponse( 'extraData', $extraData );
-    //     /*
-    //     Response::instance()->appendData( '', [
-    //         'type' => 'notice',
-    //         'bgColor' => '#FFA07A',
-    //         'color' => '#FF0000',
-    //         'title' => "Due to Covid-19 pandmic some of our delivery is getting delyaed.\nPlease have paitence if your order is not delivered yet.\nWe will reach you ASAP.",
-    //         'data' => [],
-    //     ]);
-    //     */
+    public function home_v2(Request $request) {
+        $from = $request->f ? preg_replace("/[^a-zA-Z0-9]+/", "",$request->f) : 'app';
+        $cache= new Cache();
+        if ( $cache_data = $cache->get( $from, 'HomeData' ) ){
+            return response()->json([
+                'status' => 'success',
+                'data' =>$cache_data
+            ]);
+            
+        }
+        return response()->json([
+            'refBonus' => changableData('refBonus'),
+            'versions' => ['current' => '4.1.1', 'min' => '3.1.1']
+        ]);
+        $extraData = [
+            'yt_video' => [
+                'key' => 'zC4ejeR3sJo',
+                'title' => 'How to order from Arogga App',
+            ],
+            'banner1' => CDN_URL . '/eyJidWNrZXQiOiJhcm9nZ2EiLCJrZXkiOiJtaXNjXC9ob21lQmFubmVyLmpwZWcifQ==',
+        ];
+        return response()->json([
+            'extraData' => $extraData
+        ]);
+        /*
+        Response::instance()->appendData( '', [
+            'type' => 'notice',
+            'bgColor' => '#FFA07A',
+            'color' => '#FF0000',
+            'title' => "Due to Covid-19 pandmic some of our delivery is getting delyaed.\nPlease have paitence if your order is not delivered yet.\nWe will reach you ASAP.",
+            'data' => [],
+        ]);
+        */
 
-    //     $data = [];
-    //     /*
-    //     foreach ( glob( STATIC_DIR . '/images/carousel/*.{jpg,jpeg,png,gif}', GLOB_BRACE ) as $value ) {
-    //         $data[] = \str_replace( STATIC_DIR, STATIC_URL, $value ) . '?v=' . @\filemtime($value) ?: 1;
-    //     }
-    //     */
-    //     $s3 = Functions::getS3();
-    //     $carouselFolder = $from == 'web' ? 'web' : 'app';
+        $data = [];
+        /*
+        foreach ( glob( STATIC_DIR . '/images/carousel/*.{jpg,jpeg,png,gif}', GLOB_BRACE ) as $value ) {
+            $data[] = \str_replace( STATIC_DIR, STATIC_URL, $value ) . '?v=' . @\filemtime($value) ?: 1;
+        }
+        */
+        $s3 = getS3();
+        $carouselFolder = $from == 'web' ? 'web' : 'app';
 
-    //     // Use the plain API (returns ONLY up to 1000 of your objects).
-    //     try {
-    //         $objects = $s3->listObjectsV2([
-    //             'Bucket' => Functions::getS3Bucket(),
-    //             'Prefix' => "carousel/$carouselFolder/"
-    //         ]);
-    //         foreach ($objects['Contents']  as $object) {
-    //             if( false === strpos( $object['Key'], '/.' ) && substr( $object['Key'], -1 ) != '/' ){
-    //                 if( $from == 'web' ){
-    //                     $data[] = Functions::getS3Url( $object['Key']??'', 2732, 500 );
-    //                 } else {
-    //                     $data[] = Functions::getS3Url( $object['Key']??'', 750, 300 );
-    //                 }
-    //             }
-    //         }
-    //     } catch (S3Exception $e) {
-    //         //echo $e->getMessage() . PHP_EOL;
-    //     }
+        // Use the plain API (returns ONLY up to 1000 of your objects).
+        try {
+            $objects = $s3->listObjectsV2([
+                'Bucket' => getS3Bucket(),
+                'Prefix' => "carousel/$carouselFolder/"
+            ]);
+            foreach ($objects['Contents']  as $object) {
+                if( false === strpos( $object['Key'], '/.' ) && substr( $object['Key'], -1 ) != '/' ){
+                    if( $from == 'web' ){
+                        $data[] = getS3Url( $object['Key']??'', 2732, 500 );
+                    } else {
+                        $data[] = getS3Url( $object['Key']??'', 750, 300 );
+                    }
+                }
+            }
+        } catch (S3Exception $e) {
+            //echo $e->getMessage() . PHP_EOL;
+        }
 
-    //     if( $data ){
-    //         Response::instance()->appendData( '', [
-    //             'type' => 'carousel',
-    //             'title' => '',
-    //             'data' => $data,
-    //         ]);
-    //     }
-    //     Response::instance()->appendData( '', [
-    //         'type' => 'actions',
-    //         'title' => '',
-    //         'data' => [
-    //             //discount percents
-    //             'order' => 10,
-    //             'call' => 10,
-    //             'healthcare' => 60,
-    //             //heading text
-    //             'callTime' => '10am To 10pm',
-    //         ],
-    //     ]);
-    //     $categories = Functions::getCategories();
-    //     foreach ( $categories as $cat_id => $catName ) {
-    //         $data = $this->categoryMedicinesES( $cat_id );
-    //         if( $data ){
-    //             Response::instance()->appendData( '', [
-    //                 'type' => "sideScroll-{$cat_id}",
-    //                 'title' => $catName,
-    //                 'cat_id' => $cat_id,
-    //                 'data' => $data,
-    //             ]);
-    //         }
-    //     }
-    //     Response::instance()->setStatus( 'success' );
+        if( $data ){
+            return response()->json([
+                'type' => 'carousel',
+                'title' => '',
+                'data' => $data,
+            ]);
+           
+        }
 
-    //     Cache::instance()->set( $from, Response::instance()->getResponse(), 'HomeData', 60 * 60 );
+        return response()->json([
+            'type' => 'actions',
+            'title' => '',
+            'data' => [
+                //discount percents
+                'order' => 10,
+                'call' => 10,
+                'healthcare' => 60,
+                //heading text
+                'callTime' => '10am To 10pm',
+            ]
+        ]);
 
-    //     Response::instance()->send();
+        $categories = getCategories();
+        foreach ( $categories as $cat_id => $catName ) {
+            $data = $this->categoryMedicinesES( $cat_id );
+            if( $data ){
+                return response()->json([
+                    'type' => "sideScroll-{$cat_id}",
+                    'title' => $catName,
+                    'cat_id' => $cat_id,
+                    'data' => $data,
+                ]);
+            }
+        }
+        return response()->json( 'success' );
 
-    // }
+        $cache->set( $from, 
+          
+        Response::instance()->getResponse(), 'HomeData', 60 * 60 
+    
+    );
+
+    }
 
 
+    public function medicines(Request $request, $search = '', $page = 0 ) {
+        $this->medicinesES( $search, $page );
+
+        if( ! $search ){
+            $search = $request->search ? $request->search : '';
+        }
+        if( ! $page ){
+            $page = !empty( $request->page ) ? (int)$request->page : 1;
+        }
+        $category = $request->category ? $request->category : '';
+        $cat_id = $request->cat_id  ? (int)$request->cat_id : 0;
+
+        if( 'healthcare' == $category ){
+            $per_page = 12;
+        } else {
+            $per_page = 10;
+        }
+        $limit    = $per_page * ( $page - 1 );
+        $db = new DB;
+
+
+
+        //$db->add( 'SELECT * FROM t_medicines WHERE 1=1' );
+        $query=DB::table('t_medicines')->get();
+        if ( $search ) {
+            $search = preg_replace('/[^a-z0-9\040\.\-]+/i', ' ', $search);
+
+            //$search = \rtrim( addcslashes( $search, '_%\\' ), '-');
+            $org_search = $search = \rtrim( \trim(preg_replace('/\s\s+/', ' ', $search ) ), '-' );
+
+            //$db->add( ' AND ( m_name LIKE ? OR m_generic LIKE ? )', "{$search}%", "{$search}%" );
+            //$db->add( ' AND m_name LIKE ?', "{$search}%" );
+            if( false === \strpos( $search, ' ' ) ){
+                $search .= '*';
+            } else {
+                $search = '+' . \str_replace( ' ', ' +', $search) . '*';
+            }
+            if( \strlen( $org_search ) > 2 ){
+                $query->where( " AND (MATCH(m_name) AGAINST (? IN BOOLEAN MODE) OR m_name LIKE ?)", $search, "{$org_search}%" );
+                //$db->add( " AND MATCH(m_name) AGAINST (? IN BOOLEAN MODE)", $search );
+            } elseif( $org_search ) {
+                $query->where( ' AND m_name LIKE ?', "{$org_search}%" );
+            }
+        }
+        if ( $cat_id ) {
+            $query->where( ' AND m_cat_id = ?', $cat_id );
+        }
+        if( $category ) {
+            $query->where( ' AND m_category = ?', $category );
+        }
+        $query->where( ' AND m_status = ?', 'active' );
+        $query->where( ' ORDER BY m_rob DESC, m_category, m_name, m_form DESC, m_strength, m_unit LIMIT ?, ?', $limit, $per_page );
+        
+        $cache_key = \md5( $db->getSql() . \json_encode($db->getParams()) );
+        $cache= new Cache();
+        if ( $cache_data = $cache->get( $cache_key, 'userMedicines' ) ){
+            return response()->json([
+                'status'=>'success',
+                'total'=>$cache_data['data']
+            ]);
+        }
+
+        $query = $db->execute();
+        $query->setFetchMode( \PDO::FETCH_CLASS, '\OA\Factory\Medicine');
+
+        while( $medicine = $query->fetch() ){
+            $data = [
+                'id' => $medicine->m_id,
+                'name' => $medicine->m_name,
+                'generic' => $medicine->m_generic,
+                'strength' => $medicine->m_strength,
+                'form' => $medicine->m_form,
+                'company' => $medicine->m_company,
+                'unit' => $medicine->m_unit,
+                'pic_url' => $medicine->m_pic_url,
+                'rx_req' => $medicine->m_rx_req,
+                'rob' => $medicine->m_rob,
+                'comment' => $medicine->m_comment,
+                'price' => $medicine->m_price,
+                'd_price' => $medicine->m_d_price,
+            ];
+            return response()->json([
+                'status'=>'success',
+                'data'=>$data
+            ]);
+        }
+        if ( $all_data = Response::instance()->getData() ) {
+            $cache_data = [
+                'data' => $all_data,
+                //'total' => $total,
+            ];
+            //pic_url may change. So cache for sort period of time
+            $cache->set( $cache_key, $cache_data, 'userMedicines', 60 * 60 );
+
+            //Response::instance()->setResponse( 'total', $total );
+            return response()->json('success'); 
+        } else {
+            if( $page > 1 ){
+                return response()->json('No more medicines Found' );
+            } else {
+                return response()->json('No medicines Found' );
+            }
+        }
+    }
+
+    function medicinesES(Request $request, $q = '', $page = 0) {
+        $from = $request->f ? preg_replace("/[^a-zA-Z0-9]+/", "", $request->f) : 'app';
+        if( ! $q ){
+            $q = $request->search ? $request->search : '';
+        }
+        $q = $org_q = mb_strtolower( $q );
+        $q = trim( preg_replace('/[^\w\ \.\-]+/', '', $q) );
+        if( !$q && $q != $org_q ){
+            return response()->json('No medicines Found' );
+        }
+
+        if( ! $page ){
+            $page = !empty( $request->page) ? (int) $request->page : 1;
+        }
+        $category = $request->category ? $request->category : '';
+        $cat_id = $request->cat_id ? (int) $request->cat_id : 0;
+        $havePic = !empty( $request->havePic) ? true : false;
+
+        if( 'healthcare' == $category || 'web' == $from ){
+            $per_page = 12;
+        } else {
+            $per_page = 10;
+        }
+        $args = [
+            'search' => $q,
+            'per_page' => $per_page,
+            'limit' => $per_page * ( $page - 1 ),
+            'm_status' => 'active',
+            'm_category' => $category,
+            'm_cat_id' => $cat_id,
+            'havePic' => $havePic,
+        ];
+        $data = Medicine::init()->search( $args );
+
+        if ( $data && $data['data'] ) {
+            return response()->json([
+               'status'=>'success',
+               'data'=>$data['data'], 
+            ]);
+        } else {
+            if( $page > 1 ){
+                return response()->json('No more medicines Found');
+            } else {
+                return response()->json('No medicines Found');
+            }
+        }
+    }
     public function sameGeneric($g_id, $page = 1)
     {
         $per_page = 10;
@@ -541,7 +708,7 @@ class RouteResponseController extends Controller
     public function token(Request $request)
     {
         
-        $fcm = $request->fcm ? filter_var($request->fcm, FILTER_SANITIZE_STRING) : '';
+        $fcm = $request->fcm ? filter_var($request->fcm, env('FILTER_SANITIZE_STRING')) : '';
 
         if ($tokens = Token::get()->count() < 1) {
         } else {
@@ -1005,21 +1172,142 @@ class RouteResponseController extends Controller
         Response::instance()->sendData( $data, 'success' );
     }
 
+    public function invoiceGenerate( $order ) {
+        if ( ! ( $user = User::find( $order->u_id ) ) ) {
+            return false;
+        }
+
+        $o_data = (array)$order->getMeta( 'o_data' );
+        $deductions = isset( $o_data['deductions'] ) ? $o_data['deductions'] : [];
+        $additions = isset( $o_data['additions'] ) ? $o_data['additions'] : [];
+        $address = $order->o_gps_address;
+        if( $order->o_gps_address && $order->o_address ){
+            $address .= "\n";
+        }
+        $address .= $order->o_address;
+
+        $pdf = new PDF();
+        $pdf->paidAmount = ( 'paid' === $order->o_i_status || 'paid' === $order->getMeta( 'paymentStatus' ) ) ? $order->o_total : 0 ;
+        $pdf->SetTitle( 'Invoice-' . $order->o_id . '.pdf' );
+        $pdf->AliasNbPages();
+        $pdf->AddPage();
+
+        $pdf->SetFont('Times','B',9);
+
+        $pdf->Cell(63,5,'Bill From', 0, 0, 'L');
+        $pdf->Cell(23,5,'', 0, 0, 'L');
+        $pdf->Cell(41,5,'', 0, 0, 'L');
+        $pdf->Cell(63,5,'Bill To', 0, 1, 'L');
+
+        $pdf->SetFont('Times','',9);
+
+        $pdf->Cell(63,5,'Arogga Limited', 0, 0, 'L');
+        $pdf->Cell(23,5,'Order ID:', 0, 0, 'L');
+        $pdf->Cell(41,5,$order->o_id, 0, 0, 'L');
+        $pdf->Cell(63,5,$user->u_name, 0, 1, 'L');
+
+        $pdf->Cell(63,5,'+8801810117100', 0, 0, 'L');
+        $pdf->Cell(23,5,'Order Date:', 0, 0, 'L');
+        $pdf->Cell(41,5, \date('d/m/Y', \strtotime($order->o_created) ), 0, 0, 'L');
+        $pdf->Cell(63,5,$user->u_mobile, 0, 1, 'L');
+
+        $pdf->Cell(63,5,'www.arogga.com', 0, 0, 'L');
+        $pdf->Cell(23,5,'Invoice Date:', 0, 0, 'L');
+        $pdf->Cell(41,5,\date('d/m/Y'), 0, 0, 'L');
+        $pdf->MultiCell(63,5,$address, 0, 'L');
+
+        $pdf->Ln(10);
+
+        $pdf->SetFont('Times','B',8);
+
+        $pdf->Cell(20,5,'SL No.', 1, 0, 'C');
+        $pdf->Cell(65,5,'Medicine', 1, 0, 'C');
+        $pdf->Cell(30,5,'Quantity', 1, 0, 'C');
+        $pdf->Cell(25,5,'MRP', 1, 0, 'C');
+        $pdf->Cell(25,5,'Discount', 1, 0, 'C');
+        $pdf->Cell(25,5,'Amount', 1, 1, 'C');
+
+        $pdf->SetFont('Times','',8);
+
+        $pdf->SetWidths([20,65,30,25,25,25]);
+        $pdf->SetAligns(['C','L','L','R','R','R']);
+        $i = 1;
+        foreach ( $order->medicines as $medicine ) {
+            $pdf->Row( [
+                $i++,
+                \rtrim( $medicine['name'] . '-' . $medicine['strength'], '-' ),
+                qtyText( $medicine['qty'], $medicine),
+                $medicine['price'],
+                \round( $medicine['price']-$medicine['d_price'], 2),
+                $medicine['d_price'],
+            ]);
+        }
+
+        $pdf->Ln(10);
+
+        $x = $pdf->GetX();
+        $y = $pdf->GetY();
+        $pdf->Image(  asset('/play_app_store.png'),null,null,40);
+        $pdf->SetXY($x,$y);
+
+        $pdf->SetWidths([60,30]);
+        $pdf->SetAligns(['L','R']);
+
+        $pdf->Cell(100);
+        $pdf->Row( [ 'Subtotal', $order->o_subtotal ] );
+
+        foreach ( $deductions as $deduction ) {
+            $pdf->Cell(100);
+            $pdf->Row( [ $deduction['text'] ."\n". str_replace( '৳', '', $deduction['info'] ), '-' . $deduction['amount'] ] );
+        }
+        if( $additions ) {
+            $pdf->Cell(100);
+            $pdf->Row( [ 'Total order value', $order->o_total - $order->o_addition ] );
+        }
+
+        foreach ($additions as $addition ) {
+            $pdf->Cell(100);
+            $pdf->Row( [ $addition['text'] ."\n". str_replace( '৳', '', $addition['info'] ), $addition['amount'] ] );
+        }
+        $pdf->SetFont('Times','B',8);
+        $pdf->Cell(100);
+        $pdf->Row( [ 'Amount Payable', $order->o_total . ( $pdf->paidAmount ? ' (Paid)' : '' ) ] );
+
+        // cashback
+        //if( isset($o_data['cash_back']) && $o_data['cash_back'] ){
+        $amount = $o_data['cash_back']??'00';
+        $pdf->Ln(40);
+        $pdf->SetFont('Arial', 'B', 20);
+        $pdf->Cell(190,5, $amount . ' Taka Cashback Rewarded For This Order', 0, 1, 'C');
+        $pdf->Ln(3);
+        $pdf->SetFont('Arial', 'I', 10);
+        $pdf->Cell(190,5,'* N.B: This cashback will be applicable at your next Order', 0, 1, 'C');
+        //}
+
+        @mkdir( public_path() . '/temp', 0755, true );
+
+        $pdf->Output( 'F', public_path() . '/temp/Invoice-' . $order->o_id . '.pdf' );
+        return  asset('/temp/Invoice-' . $order->o_id . '.pdf');
+    }
 
     public function invoice( $o_id, $token) {
-  
+        if ( ! (Auth::check()) ) {
+            Response::instance()->loginRequired( true );
+            Response::instance()->sendMessage( 'Invalid id token' );
+        }
+
         if( ! ( $order = getOrder( $o_id ) ) ){
-            return response()->json( 'No orders found.' );
+            Response::instance()->sendMessage( 'No orders found.' );
         }
         if( ! $order->validateToken( $token ) ){
-            return response()->json( 'Invalid request' );
+            Response::instance()->sendMessage( 'Invalid request' );
         }
-        $user= Auth::user();
-        if ( ! ($user->u_id )) {
-            return response()->json( 'No order user found.' );
+
+        if ( ! ( $user = User::find( $order->u_id ) ) ) {
+            Response::instance()->sendMessage( 'No order user found.' );
         }
         if( ! ( $invoice = $this->invoiceGenerate( $order ) ) ){
-            return response()->json( 'No invoices generated.' );
+            Response::instance()->sendMessage( 'No invoices generated.' );
         }
 
         header('Content-Type: application/pdf');
@@ -1030,7 +1318,7 @@ class RouteResponseController extends Controller
         readfile( $invoice );
         unlink( $invoice );
 
-        Log::instance()->insert([
+        Log::create([
             'log_response_code' => 200,
             'log_response' => 'Invoice-' . $order->o_id . '.pdf',
         ]);
@@ -1041,19 +1329,20 @@ class RouteResponseController extends Controller
     public function invoiceBag( $b_id, $token ) {
         $tokenDecoded = jwtDecode( $token );
         if( !$tokenDecoded || empty( $tokenDecoded['b_id'] ) || $b_id != $tokenDecoded['b_id']  ){
-            return response()->json( 'Invalid request' );
+            Response::instance()->sendMessage( 'Invalid request' );
         }
         $bag = Bag::getBag( $b_id );
 
         if( !$bag || !$bag->o_count ){
-            return response()->json( 'No orders found.' );
+            Response::instance()->sendMessage( 'No orders found.' );
         }
         $o_ids = $bag->o_ids;
 
-        CacheUpdate::add_to_queue( $o_ids, 'order_meta');
-        CacheUpdate::add_to_queue( $o_ids, 'order');
-        CacheUpdate::update_cache( [], 'order_meta' );
-        CacheUpdate::update_cache( [], 'order' );
+        $cacheUpdate = new CacheUpdate();
+        $cacheUpdate->add_to_queue( $o_ids, 'order_meta');
+        $cacheUpdate->add_to_queue( $o_ids, 'order');
+        $cacheUpdate->update_cache( [], 'order_meta' );
+        $cacheUpdate->update_cache( [], 'order' );
 
         $merge = new FPDF_Merge();
         $gen_o_ids = [];
@@ -1071,7 +1360,7 @@ class RouteResponseController extends Controller
             $gen_o_ids[] = $order->o_id;
         }
         if( !$gen_o_ids ){
-            return response()->json( 'Nothing to output.' );
+            Response::instance()->sendMessage( 'Nothing to output.' );
         }
         Log::instance()->insert([
             'log_response_code' => 200,
@@ -1089,24 +1378,20 @@ class RouteResponseController extends Controller
         $page     = (int) $page;
         $limit    = $per_page * ( $page - 1 );
 
-        // if ( ! (Auth::id()) ) {
-        //     return response()->json([
-        //         'loginRequired'=>true,
-        //         'status'=>'Fail',
-        //         'message'=>'Invalid id token',
-        //         'data'=>[],
-        //     ]);
-        // }
+         if ( ! (Auth::id()) ) {
+             Response::instance()->loginRequired( true );
+             Response::instance()->sendMessage( 'Invalid id token' );
+         }
 
 
         $orders= Order::orderBy('o_id', 'desc')->where('u_id', Auth::id())
         ->where('o_status', $status)->limit($per_page)->offset($limit)->get();
         if( ! $orders ){
-            return response()->json( 'No Orders Found' );
+            Response::instance()->sendMessage( 'No Orders Found' );
         }
-        // $o_ids = array_map(function($o) { return $o->o_id;}, $orders);
-        // CacheUpdate::instance()->add_to_queue( $o_ids , 'order_meta');
-        // CacheUpdate::instance()->update_cache( [], 'order_meta' );
+         $o_ids = array_map(function($o) { return $o->o_id;}, $orders);
+         CacheUpdate::instance()->add_to_queue( $o_ids , 'order_meta');
+         CacheUpdate::instance()->update_cache( [], 'order_meta' );
 
         foreach( $orders as $order ){
             $data = $order->toArray();
@@ -1121,37 +1406,29 @@ class RouteResponseController extends Controller
             if( \in_array( $order->o_status, [ 'confirmed', 'delivering', 'delivered' ] ) && \in_array( $order->o_i_status, ['packing', 'checking', 'confirmed'] ) && 'paid' !== $order->getMeta( 'paymentStatus' ) ){
                 $data['paymentUrl'] = $order->signedUrl( '/payment/v1' );
             }
-            return response()->json( [
-                '', $data
-            ] );
+            Response::instance()->appendData( '', $data );
         }
-        if ( ! $orders ) {
-            return response()->json( 'No Orders Found' );
+        if ( ! Response::instance()->getData() ) {
+            Response::instance()->sendMessage( 'No Orders Found' );
         } else {
-            return response()->json( 'success' );
+            Response::instance()->setStatus( 'success' );
+            Response::instance()->send();
         }
     }
 
 
     function cashBalance(){
         $user = User::getUser( Auth::id() );
-        if ( ! (Auth::id()) ) {
-            return response()->json([
-                'loginRequired'=>true,
-                'status'=>'Fail',
-                'message'=>'Invalid id token',
-                'data'=>[],
-            ]);
+        if( ! $user ) {
+            Response::instance()->loginRequired( true );
+            Response::instance()->sendMessage( 'No users Found' );
         }
         
         $data = [
             'u_cash' => \round( $user->u_cash, 2 ),
             'u_p_cash' => \round( $user->u_p_cash, 2 ),
         ];
-        return response()->json([
-            'status'=>'success',
-            'data'=>$data,
-        ]);
+        Response::instance()->sendData( $data, 'success' );
     }
 
 
@@ -1159,23 +1436,17 @@ class RouteResponseController extends Controller
         $lat = isset( $request['lat'] ) ? $request['lat'] : 0;
         $long = isset( $request['long'] ) ? $request['long'] : 0;
         if( ! $lat || ! $long ){
-            return response()->json( 'Invalid location.' );
+            Response::instance()->sendMessage( 'Invalid location.' );
         }
 
+        /*
         if( isInside( $lat, $long, 'chittagong' ) ){
-            return response()->json([
-                'status'=>'Fail',
-                'message'=>'Our Chattogram operation temporarily off due to some unavoidable circumstances. We will send you a notification once our Chattogram operation resumes.\nSorry for this inconvenience.',
-                'data'=>[],
-            ]);
+            Response::instance()->sendMessage( "Our Chattogram operation temporarily off due to some unavoidable circumstances. We will send you a notification once our Chattogram operation resumes.\nSorry for this inconvenience.");
         }
-        if( ! isInside( $lat, $long ) ){
-            return response()->json([
-                'status'=>'Fail',
-                'message'=>'Our delivery service comming to this area very soon, please stay with us.',
-                'data'=>[],
-            ]);
+        if( !isInside( $lat, $long ) ){
+            Response::instance()->sendMessage( "Our delivery service comming to this area very soon, please stay with us.");
         }
+        */
 
         $client = new Client();
         $res = $client->get( \sprintf( 'https://barikoi.xyz/v1/api/search/reverse/geocode/server/%s/place', env('BARIKOI_API_KEY', '') ), [
@@ -1186,11 +1457,11 @@ class RouteResponseController extends Controller
             ],
         ]);
         if( 200 !== $res->getStatusCode() ){
-            return response()->json( 'Something went wrong, Please try again.' );
+            Response::instance()->sendMessage( 'Something went wrong, Please try again.' );
         }
         $body = maybeJsonDecode( $res->getBody()->getContents() );
         if( ! $body || ! \is_array( $body ) || 200 !== $body['status'] ){
-            return response()->json( 'Something went wrong, Please try again' );
+            Response::instance()->sendMessage( 'Something went wrong, Please try again' );
         }
         $location = [];
         if( ! empty( $body['place']['address'] ) ){
@@ -1207,33 +1478,27 @@ class RouteResponseController extends Controller
 
         $location = \array_unique( \array_filter( $location ) );
         if( ! $location ){
-            return response()->json( 'No address found, Please try again.' );
+            Response::instance()->sendMessage( 'No address found, Please try again.' );
         }
         $data['homeAddress'] = ! empty( $body['place']['address'] ) ? trim($body['place']['address']) : '';
         $data['location'] = \implode( ', ', $location );
         $data['place'] = $body['place'];
-        
-        return response()->json([
-            'status'=>'success',
-            'data'=>$data,
-        ]);
+
+        Response::instance()->sendData( $data, 'success' );
     }
 
 
 
     function profile() {
-        $user = User::getUser( Auth::id() );
+        $user = Auth::user();
         if( ! $user ){
-            return response()->json( 'You are not logged in' );
+            Response::instance()->sendMessage( 'You are not logged in' );
         }
-        $data = User::where('u_id', Auth::id())->get();
+        $data = $user->toArray();
         //$data['authToken'] = $user->authToken();
-        $data['u_pic_url'] = getProfilePicUrl( Auth::id() );
-        
-        return response()->json([
-            'status'=>'success',
-            'data'=>$data,
-        ]);
+        $data['u_pic_url'] =  getProfilePicUrl( Auth::id() );
+
+        Response::instance()->sendData( ['user' =>  $data], 'success' );
     }
 
 
@@ -1308,14 +1573,10 @@ class RouteResponseController extends Controller
 
 
 
-    function prescriptions() {
-        $page = isset( $_GET['page'] ) ? (int)$_GET['page'] : 1;
+    function prescriptions(Request $request) {
+        $page = isset( $request['page'] ) ? (int)$request['page'] : 1;
         if( ! Auth::check() ){
-            return response()->json( [
-                "status"=> "fail",
-                "message"=> "You are not logged in",
-                "data"=> []
-            ] );
+            Response::instance()->sendMessage( 'You are not logged in' );
         }
         $user = Auth::user();
         $p_array = maybeJsonDecode($user->getMeta( 'prescriptions' ));

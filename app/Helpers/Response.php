@@ -2,6 +2,8 @@
 
 namespace App\Helpers;
 
+use App\Models\Log;
+
 class Response
 {
     private static $instance;
@@ -77,10 +79,10 @@ class Response
 
         $this->response['data']    = $this->data;
 
-        /*Log::instance()->insert([
+        Log::create([
             'log_response_code' => $this->code,
             'log_response' => $this->response,
-        ]);*/
+        ]);
 
         echo json_encode( $this->response );
         die;

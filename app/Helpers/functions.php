@@ -15,6 +15,7 @@ use App\Models\Meta;
 use App\Models\User;
 use Illuminate\Support\Facades\Storage;
 use Tymon\JWTAuth\Facades\JWTAuth;
+use App\Cache\Cache;
 
 const ACTIVE_SMS_GATEWAYS = ['ALPHA', 'GREENWEB', 'BULK71', 'MDL'];
 
@@ -866,11 +867,17 @@ if (!function_exists('getZoneByLocationId')) {
     }
 }
 
+if (!function_exists('jwtEncode')) {
+    function jwtEncode( $payload ){
+        return JWT::encode( $payload, env('JWT_TOKEN_KEY'));
+    }
+}
+
 if (!function_exists('jwtDecode')) {
     function jwtDecode($token)
     {
         try {
-            $payload = (array)JWTAuth::decode($token, JWT_TOKEN_KEY, array('HS256'));
+            $payload = (array)JWT::decode( $token, env('JWT_TOKEN_KEY'), array('HS256'));
 
             return $payload;
         } catch (\Exception $e) {
@@ -1800,7 +1807,6 @@ if (!function_exists('checkOrdersForPacking')) {
     }
 }
 
-
 if (!function_exists('getLedgerFiles')) {
     function getLedgerFiles($images)
     {
@@ -1811,6 +1817,23 @@ if (!function_exists('getLedgerFiles')) {
             $images[$key]['src'] = getPresignedUrl($image['s3key']);
         }
         return $images;
+    }
+}
+
+if (!function_exists('qtyText')) {
+    function qtyText( $qty, $medicine ) {
+        if( !$medicine ){
+            return '';
+        }
+        if( $medicine['form'] == $medicine['unit'] ) {
+            $s = ( $qty === 1 ) ? '' : 's';
+            return $qty . ' ' . $medicine['unit'] . $s;
+        }
+        if( $medicine['unit'] == 10 . ' ' . $medicine['form'] . 's' ) {
+            return $qty*10 . ' ' . $medicine['form'] . 's';
+        }
+
+        return $qty . 'x' . $medicine['unit'];
     }
 }
 
@@ -1885,13 +1908,6 @@ if (!function_exists('modifyLedgerFiles')) {
     }
 }
 
-if (!function_exists('jwtEncode')) {
-    function jwtEncode( $payload ){
-        return JWT::encode( $payload, env('JWT_TOKEN_KEY') );
-    }
-}
-
-
 if (!function_exists('uploadToS3')) {
     function uploadToS3($id, $file, $folder = 'order', $fileName = '', $mime = '', $prevS3key = '')
     {
@@ -1945,7 +1961,6 @@ if (!function_exists('sendAsyncNotification')) {
         } catch (\Exception $e) {
             return false;
         }
-        return false;
     }
 }
 
@@ -2016,5 +2031,24 @@ if (!function_exists('url')) {
         $ret = $protocol . $base . $ret . $frag;
         $ret = rtrim($ret, '?');
         return $ret;
+    }
+}
+
+
+
+
+if (!function_exists('getCategories')) {
+     function getCategories(){
+        $cache= new Cache();
+        if ( $cache_data = $cache->get( 'categories' ) ){
+            return $cache_data;
+        }
+      
+        // $query = DB::db()->prepare( 'SELECT c_id, c_name FROM t_categories ORDER BY c_order' );
+        $data = DB::table('t_categories')->orderBy('c_order')->get();
+
+        $cache->set( 'categories', $data );
+
+        return $data;
     }
 }

@@ -113,3 +113,43 @@ if (!function_exists('getBag')) {
         }
     }
 }
+if (!function_exists('getLocation')) {
+    function getLocation($id)
+    {
+        if (!$id || !is_numeric($id)) {
+            return false;
+        }
+
+        $cache = new Cache();
+        if ($location = $cache->get($id, 'location')) {
+            return $location;
+        }
+
+        if ($location = Location::find($id)) {
+            $cache->set($location->l_id, $location, 'location');
+            return $location;
+        } else {
+            return false;
+        }
+    }
+}
+if (!function_exists('getValueByLocationId')) {
+    function getValueByLocationId($l_id, $value): bool
+    {
+        if( !$l_id || !$value){
+            return false;
+        }
+        $location = getLocation( $l_id );
+        if ( $location ){
+            switch ( $value ) {
+                case 'district':
+                    return $location->l_district;
+                    break;
+                case 'zone':
+                    return $location->l_zone;
+                    break;
+            }
+        }
+        return false;
+    }
+}

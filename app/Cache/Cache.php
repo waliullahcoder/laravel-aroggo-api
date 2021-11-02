@@ -117,4 +117,23 @@ class Cache{
         $group = strtoupper($group);
         return self::CACHE_KEY . ".$group";
     }
+
+    public function delete( $key, $group = 'default' ) {
+        if ( empty( $group ) )
+            $group = 'default';
+        $key = "{$group}.{$key}";
+        $cacheKey = $this->getCacheKey($key);
+        if( !CacheParent::has($cacheKey) )
+            return false;
+
+        CacheParent::forget($cacheKey);
+        return true;
+    }
+
+    public function flush() {
+
+        CacheParent::flush();
+        return true;
+    }
+
 }

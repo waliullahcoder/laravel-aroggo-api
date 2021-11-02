@@ -76,6 +76,8 @@ class Bag extends Model
         }
     }
 
-    
+    public function fullZone(){
+        return sprintf( '%s-%d', $this->b_zone, $this->b_no );
+    }
 
 }

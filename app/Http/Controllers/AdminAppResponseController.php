@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Cache\Cache;
+use App\Helpers\Response;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -23,93 +24,94 @@ use App\Models\Collection;
 use GuzzleHttp\Client;
 class AdminAppResponseController extends Controller
 {
+    private $user;
+
+    function __construct() {
+        if ( ! ( $user = Auth::user() ) ) {
+            Response::instance()->loginRequired( true );
+            Response::instance()->sendMessage( 'Invalid id token' );
+        }
+        $this->user = $user;
+        if ( !\in_array( $this->user->u_role, [ 'delivery', 'pharmacy', 'packer', 'purchaser' ] ) ) {
+            Response::instance()->sendMessage( 'Your account does not have permission to access this.' );
+        }
+    }
     public function orders(Request $request) {
-      
+
         $status = $request->status ? $request->status : '';
-        $page = $request->page ? $request->page : 1;
+        $page = $request->page ? (int)$request->page : 1;
         $lat = $request->lat ? $request->lat : '';
         $long = $request->long ? $request->long : '';
         $search = $request->search ? $request->search : '';
         $zone = $request->zone ? $request->zone : '';
-        $hideOutsideDhaka = $request->hideOutsideDhaka ? $request->hideOutsideDhaka : '';
+        $hideOutsideDhaka = $request->hideOutsideDhaka ? filter_var( $request->hideOutsideDhaka, FILTER_VALIDATE_BOOLEAN ) : '';
         $per_page = 10;
         $limit    = $per_page * ( $page - 1 );
 
-        $db = new DB;
-
-        $db->add( 'SELECT SQL_CALC_FOUND_ROWS tr.* FROM t_orders tr' );
-        $db->add( ' INNER JOIN t_locations tl ON tr.o_l_id = tl.l_id' );
-        $db->add( ' WHERE 1 = 1' );
-
-        // $orders = DB::table('t_orders')
-        // ->leftJoin('t_locations', 't_orders.o_id', '=', 't_locations.l_id')
-        // ->get();
-        
+        $order = Order::from('t_orders AS tr')
+                ->join('t_locations AS tl', 'tr.o_l_id', 'tl.l_id');
         if ( $zone ){
-            $db->add( ' AND tl.l_zone = ?', $zone);
-        } elseif ( $hideOutsideDhaka && in_array( $this->user->u_role, [ 'packer', 'pharmacy' ] ) ){
-            $db->add( ' AND tl.l_district = ?', 'Dhaka City' );
+            $order = $order->where( 'tl.l_zone', '=', $zone);
+        }
+        if ( $hideOutsideDhaka && in_array( $this->user->u_role, [ 'packer', 'pharmacy' ] ) ){
+            $order = $order->whereRaw( `'( tl.l_district = 'Dhaka City' OR tr.o_payment_method IN ('fosterPayment', 'bKash', 'nagad') )` );
         }
         if ( $search && \is_numeric( $search ) ) {
-            $db->add( ' AND tr.o_id = ?', $search );
+            $order = $order->where( 'tr.o_id', '=', $search );
         }
         if ( 'pharmacy' == $this->user->u_role ) {
-            $db->add( ' AND tr.o_ph_id = ?', $this->user->u_id );
+            $order = $order->where( 'tr.o_ph_id', '=', $this->user->u_id );
         } elseif( 'delivery' == $this->user->u_role ) {
-            $db->add( ' AND tr.o_de_id = ?', $this->user->u_id );
+            $order = $order->where( 'tr.o_de_id', '=', $this->user->u_id );
         } elseif( 'packer' == $this->user->u_role ) {
             if( $ph_id = $this->user->getMeta( 'packer_ph_id' ) ){
-                $db->add( ' AND tr.o_ph_id = ?', $ph_id );
+                $order = $order->where( 'tr.o_ph_id', '=', $ph_id );
             }
         }
         if ( \in_array( $status, [ 'ph_new' ] ) ) {
-            $db->add( ' AND tr.o_status = ? AND tr.o_i_status = ?', 'confirmed', 'ph_fb' );
+            $order = $order->where( [['tr.o_status', '=', 'confirmed'], ['tr.o_i_status', '=', 'ph_fb']] );
         } elseif ( \in_array( $status, [ 'de_new' ] ) ) {
-            $db->add( ' AND tr.o_status = ? AND tr.o_i_status IN (?,?,?)', 'confirmed', 'ph_fb', 'packing', 'checking' );
+            $order = $order->where( 'tr.o_status', '=', 'confirmed');
+            $order = $order->whereIn( 'tr.o_i_status', ['ph_fb', 'packing', 'checking'] );
         } elseif ( \in_array( $status, [ 'ph_issue' ] ) ) {
-            $db->add( ' AND tr.o_is_status = ?', 'delivered' );
+            $order = $order->where( 'tr.o_is_status', '=', 'delivered' );
         } elseif ( \in_array( $status, [ 'packing', 'checking' ] ) ) {
-            $db->add( ' AND ( ( tr.o_status = ? AND tr.o_i_status = ? ) OR tr.o_is_status = ? )', 'confirmed', $status, $status );
+            $order = $order->whereRaw(  `AND ( ( tr.o_status = 'confirmed' AND tr.o_i_status = $status ) OR tr.o_is_status = $status )` );
         } elseif ( \in_array( $status, [ 'confirmed' ] ) ) {
-            $db->add( ' AND ( tr.o_status = ? OR tr.o_is_status = ? )', $status, 'packed' );
-            $db->add( ' AND tr.o_i_status IN (?,?)', 'confirmed', 'paid' );
+            $order = $order->whereRaw( `AND ( tr.o_status = $status OR tr.o_is_status = 'packed' )`);
+            $order = $order->whereIn( 'tr.o_i_status', ['confirmed', 'paid'] );
         } elseif ( \in_array( $status, [ 'delivering', 'delivered' ] ) ) {
-            $db->add( ' AND ( tr.o_status = ? OR tr.o_is_status = ? )', $status, $status );
-            $db->add( ' AND tr.o_i_status IN (?,?)', 'confirmed', 'paid' );
+            $order = $order->whereRaw( ' AND ( tr.o_status = ? OR tr.o_is_status = ? )', $status, $status );
+            $order = $order->whereRaw( ' AND tr.o_i_status IN (?,?)', 'confirmed', 'paid' );
         } elseif ( $status ) {
-            $db->add( ' AND tr.o_status = ?', $status );
-            $db->add( ' AND tr.o_i_status IN (?,?)', 'confirmed', 'paid' );
+            $order = $order->whereRaw( ' AND tr.o_status = ?', $status );
+            $order = $order->whereRaw( ' AND tr.o_i_status IN (?,?)', 'confirmed', 'paid' );
         }
-      
 
         if( 'delivered' == $status ) {
-            $db->add( ' ORDER BY tr.o_delivered DESC' );
+            $order = $order->orderBy( 'tr.o_delivered', 'DESC' );
         } elseif( 'delivering' == $status ) {
-            $db->add( ' ORDER BY tr.o_priority DESC, tr.o_id ASC' );
+            $order = $order->orderBy( 'tr.o_priority', 'DESC',);
+            $order = $order->orderBy( 'tr.o_id', 'ASC',);
         } else {
-            $db->add( ' ORDER BY tr.o_id ASC' );
+            $order = $order->orderBy( 'tr.o_id', 'ASC' );
         }
 
-        $db->add( ' LIMIT ?, ?', $limit, $per_page );
-        
-        $query = $db->execute();
-        $total = DB::db()->query('SELECT FOUND_ROWS()')->fetchColumn();
-        $query->setFetchMode( \PDO::FETCH_CLASS, '\OA\Factory\Order');
+        $order = $order->limit( $limit, $per_page );
 
-        $orders = $query->fetchAll();
+        $orders = $order->get();
+        $total = count($orders);
+
         if( ! $orders ){
-            return response()->json( 'No Orders Found' );
+            Response::instance()->sendMessage( 'No Orders Found' );
         }
         $o_ids = array_map(function($o) { return $o->o_id;}, $orders);
-        CacheUpdate::add_to_queue( $o_ids , 'order_meta');
-        CacheUpdate::update_cache( [], 'order_meta' );
+        CacheUpdate::instance()->add_to_queue( $o_ids , 'order_meta');
+        CacheUpdate::instance()->update_cache( [], 'order_meta' );
 
         $laterCount = [];
         if ( 'pharmacy' == $this->user->u_role ) {
-            $in  = str_repeat('?,', count($o_ids) - 1) . '?';
-            $query2 = DB::db()->prepare( "SELECT o_id, COUNT(m_id) FROM t_o_medicines WHERE o_id IN ($in) AND om_status = ? GROUP BY o_id" );
-            $query2->execute([...$o_ids, 'later']);
-            $laterCount = $query2->fetchAll( \PDO::FETCH_KEY_PAIR );
+            $laterCount = OMedicine::select('o_id', 'COUNT(m_id)')->whereIn('o_id', $o_ids)->where('om_status', 'later')->groupBy('o_id')->get();
         }
 
         $deliveredCount = [];
@@ -118,8 +120,7 @@ class AdminAppResponseController extends Controller
             $u_ids = array_filter( array_unique( $u_ids ) );
             $in  = str_repeat('?,', count($u_ids) - 1) . '?';
             $query2 = DB::db()->prepare( "SELECT u_id, COUNT(o_id) FROM t_orders WHERE u_id IN ($in) AND o_status = ? GROUP BY u_id" );
-            $query2->execute([...$u_ids, 'delivered']);
-            $deliveredCount = $query2->fetchAll( \PDO::FETCH_KEY_PAIR );
+            $deliveredCount = Orders::select('u_id', DB::raw('COUNT(o_id) AS total'))->whereIn('u_id', $u_ids)->where('o_status', 'delivered')->groupBy('u_id')->pluck('total', 'u_id')->toArray();
         }
 
         foreach( $orders as $order ){
@@ -128,9 +129,9 @@ class AdminAppResponseController extends Controller
             $data['o_i_note'] = (string)$order->getMeta('o_i_note');
             $data['cold'] = $order->hasColdItem();
 
-            if ( in_array( $this->user->u_role, [ 'pharmacy', 'packer' ] ) && $order->o_l_id && ( $l_zone = Functions::getZoneByLocationId( $order->o_l_id ) ) ){
+            if ( in_array( $this->user->u_role, [ 'pharmacy', 'packer' ] ) && $order->o_l_id && ( $l_zone = getValueByLocationId( $order->o_l_id, 'zone' ) ) ){
                 $b_id = $order->getMeta( 'bag' );
-                if( $b_id && ( $bag = Bag::getBag( $b_id ) ) ){
+                if( $b_id && ( $bag = getBag( $b_id ) ) ){
                     $data['zone'] = $bag->fullZone();
                 } else {
                     $data['zone'] = $l_zone;
@@ -138,7 +139,7 @@ class AdminAppResponseController extends Controller
             }
 
             if ( \in_array( $this->user->u_role, [ 'pharmacy' ] ) ) {
-                if ( !empty($data['o_de_id']) && ( $user = User::getUser( $data['o_de_id'] ) ) ) {
+                if ( !empty($data['o_de_id']) && ( $user = getUser( $data['o_de_id'] ) ) ) {
                     $data['o_de_name'] = $user->u_name;
                 }
             }
@@ -152,18 +153,14 @@ class AdminAppResponseController extends Controller
                 $data['packedWrong'] = (bool)$order->getMeta( 'packedWrong' );
             }
 
-            return response()->json([
-                'status'=>'success',
-                'data'=>$data
-            ]);
+            Response::instance()->appendData( '', $data );
         }
-        if ( ! $data) {
-            return response()->json( 'No Orders Found' );
+        if ( ! Response::instance()->getData() ) {
+            Response::instance()->sendMessage( 'No Orders Found' );
         } else {
-            return response()->json([
-                'status'=>'success',
-                'total'=>$total
-            ]);
+            Response::instance()->setResponse( 'total', $total );
+            Response::instance()->setStatus( 'success' );
+            Response::instance()->send();
         }
     }
 
