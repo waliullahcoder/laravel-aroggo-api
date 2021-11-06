@@ -5,6 +5,7 @@ use App\Models\Bag;
 use App\Models\Discount;
 use App\Models\Location;
 use \App\Models\Medicine;
+use App\Models\Option;
 use App\Models\Order;
 
 if (!function_exists('getMedicine')) {
@@ -151,5 +152,23 @@ if (!function_exists('getValueByLocationId')) {
             }
         }
         return false;
+    }
+}
+if (!function_exists('getOption')) {
+    function getOption($key)
+    {
+        $found = false;
+        $value =(new Cache())->get( $key, 'option', false, $found );
+        if ( $found ){
+            return $value;
+        }
+        if( $option = Option::where('option_name', $key)->first() ){
+            $value = maybeJsonDecode( $option->option_value );
+            (new Cache())->set( $key, $value, 'option' );
+            return $value;
+        } else {
+            (new Cache())->set( $key, false, 'option' );
+            return false;
+        }
     }
 }

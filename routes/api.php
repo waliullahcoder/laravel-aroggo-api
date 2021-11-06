@@ -39,7 +39,7 @@ Route::get('/v2/home/', [RouteResponseController::class, 'home_v2']);//ok//Main 
 Route::get('/v1/medicines/{search}/{page}/', [RouteResponseController::class, 'medicines']);//checked //Argument 1 passed error
 Route::get('/v1/sameGeneric/{g_id}/{page}/', [RouteResponseController::class, 'sameGeneric']);//OK// New Table field changed
 Route::get('/{version}/medicine/{m_id}/', [RouteResponseController::class, 'medicineSingle']);//checked//getMedicine error
-Route::get('/{version}/medicine/extra/{m_id}/', [RouteResponseController::class, 'medicineSingleExtra']);//ok
+Route::get('/{version}/medicine/extra/{m_id}/', [RouteResponseController::class, 'medicineSingleExtra']);//ok//undefined //getMedicine()
 
 
 Route::get('/v1/medicine/price/{m_id}/', [RouteResponseController::class, 'medicinePrice']); //ok

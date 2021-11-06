@@ -188,31 +188,61 @@ class RouteResponseController extends Controller
         ]);
     }
 
+    public function medicinesQueryES( $args = [] ) {
+        $args = array_merge([
+            'per_page' => 10,
+            'm_status' => 'active',
+            'havePic' => true,
+            'm_rob' => true,
+        ], $args );
+        $data = \OA\Search\Medicine::init()->search( $args );
+
+        if ( $data && $data['data'] ) {
+            return $data['data'];
+        }
+        return [];
+    }
+
+    public function categoryMedicinesES( $cat_id, $per_page = 15 ) {
+        $args = [
+            'per_page' => $per_page,
+            'm_cat_id' => $cat_id,
+        ];
+        return $this->medicinesQueryES( $args );
+    }
 
     public function home_v2(Request $request) {
-        $from = $request->f ? preg_replace("/[^a-zA-Z0-9]+/", "",$request->f) : 'app';
-        $cache= new Cache();
-        if ( $cache_data = $cache->get( $from, 'HomeData' ) ){
-            return response()->json([
-                'status' => 'success',
-                'data' =>$cache_data
-            ]);
-            
+        $from = isset( $request->f ) ? preg_replace("/[^a-zA-Z0-9]+/", "",$request->f) : 'app';
+        /*
+        if ( $cache_data = Cache::instance()->get( $from, 'HomeData' ) ){
+            Response::instance()->replaceResponse( $cache_data );
+            Response::instance()->send();
         }
-        return response()->json([
-            'refBonus' => changableData('refBonus'),
-            'versions' => ['current' => '4.1.1', 'min' => '3.1.1']
+        */
+        Response::instance()->setResponse( 'refBonus', changableData('refBonus') );
+        Response::instance()->setResponse( 'versions', [
+            'current' => '4.2.1',
+            'min' => '3.1.1',
+            'android' => [
+                'current' => '4.2.1',
+                'min' => '3.1.1',
+            ],
+            'ios' => [
+                'current' => '4.2.1',
+                'min' => '3.1.1',
+            ],
         ]);
+
         $extraData = [
             'yt_video' => [
-                'key' => 'zC4ejeR3sJo',
-                'title' => 'How to order from Arogga App',
+                'key' => getOption('yt_video_key'),
+                'title' => getOption('yt_video_title'),
             ],
-            'banner1' => CDN_URL . '/eyJidWNrZXQiOiJhcm9nZ2EiLCJrZXkiOiJtaXNjXC9ob21lQmFubmVyLmpwZWcifQ==',
         ];
-        return response()->json([
-            'extraData' => $extraData
-        ]);
+        if ( ( $banners = getOption( 'attachedFilesHomepageBanner' ) ) && is_array( $banners ) ){
+            $extraData['banner1']= getS3Url( $banners[0]['s3key']??'', 1000, 1000 );
+        }
+        Response::instance()->setResponse( 'extraData', $extraData );
         /*
         Response::instance()->appendData( '', [
             'type' => 'notice',
@@ -229,55 +259,47 @@ class RouteResponseController extends Controller
             $data[] = \str_replace( STATIC_DIR, STATIC_URL, $value ) . '?v=' . @\filemtime($value) ?: 1;
         }
         */
-        $s3 = getS3();
-        $carouselFolder = $from == 'web' ? 'web' : 'app';
 
-        // Use the plain API (returns ONLY up to 1000 of your objects).
-        try {
-            $objects = $s3->listObjectsV2([
-                'Bucket' => getS3Bucket(),
-                'Prefix' => "carousel/$carouselFolder/"
-            ]);
-            foreach ($objects['Contents']  as $object) {
-                if( false === strpos( $object['Key'], '/.' ) && substr( $object['Key'], -1 ) != '/' ){
-                    if( $from == 'web' ){
-                        $data[] = getS3Url( $object['Key']??'', 2732, 500 );
-                    } else {
-                        $data[] = getS3Url( $object['Key']??'', 750, 300 );
-                    }
+        $carouselImgType = $from == 'web' ? 'attachedFilesWeb' : 'attachedFilesApp';
+        if ( ( $carouselImages = Option::get( $carouselImgType ) ) && is_array( $carouselImages ) ){
+            foreach ($carouselImages as $image){
+                if( $from == 'web' ){
+                    $data[] = getS3Url( $image['s3key'], 2732, 500 );
+                } else {
+                    $data[] = getS3Url( $image['s3key'], 750, 300 );
                 }
             }
-        } catch (S3Exception $e) {
-            //echo $e->getMessage() . PHP_EOL;
         }
 
         if( $data ){
-            return response()->json([
+            Response::instance()->appendData( '', [
                 'type' => 'carousel',
                 'title' => '',
                 'data' => $data,
             ]);
-           
         }
-
-        return response()->json([
+        Response::instance()->appendData( '', [
             'type' => 'actions',
             'title' => '',
             'data' => [
                 //discount percents
-                'order' => 10,
-                'call' => 10,
-                'healthcare' => 60,
+                'order' => (int)getOption('prescription_percent'),
+                'call' => (int)getOption('call_percent'),
+                'healthcare' => (int)getOption('healthcare_percent'),
                 //heading text
-                'callTime' => '10am To 10pm',
-            ]
+                'callTime' => getOption('call_time'),
+            ],
         ]);
-
         $categories = getCategories();
         foreach ( $categories as $cat_id => $catName ) {
-            $data = $this->categoryMedicinesES( $cat_id );
+            $data = [];
+            if( ( $cat_m_ids = getOption( "categories_sidescroll-{$cat_id}" ) ) && is_array( $cat_m_ids ) ){
+                $data = $this->medicinesQueryES(['ids' => $cat_m_ids]);
+            }
+            $data = array_merge( $data, $this->categoryMedicinesES( $cat_id, 15 - count( $data ) ) );
+
             if( $data ){
-                return response()->json([
+                Response::instance()->appendData( '', [
                     'type' => "sideScroll-{$cat_id}",
                     'title' => $catName,
                     'cat_id' => $cat_id,
@@ -285,14 +307,11 @@ class RouteResponseController extends Controller
                 ]);
             }
         }
-        return response()->json( 'success' );
+        Response::instance()->setStatus( 'success' );
 
-        $cache->set( $from, 
-          
-        Response::instance()->getResponse(), 'HomeData', 60 * 60 
-    
-    );
+        //Cache::instance()->set( $from, Response::instance()->getResponse(), 'HomeData', 60 * 60 );
 
+        Response::instance()->send();
     }
 
 
