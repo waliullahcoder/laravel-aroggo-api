@@ -13,4 +13,6 @@ class Option extends Model
 
     protected $table = "t_options";
     public $timestamps = false;
+
+
 }

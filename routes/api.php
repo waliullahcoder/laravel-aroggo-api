@@ -35,8 +35,8 @@ Route::post('/admin/v1/auth/sms/verify/', [AuthController::class, 'adminSMSVerif
 Route::get('/{version}/data/initial/{table}/{page}/', [RouteResponseController::class, 'dataInitial']);//ok
 Route::get('/{version}/data/check/{dbVersion}/', [RouteResponseController::class, 'dataCheck']);//ok
 Route::get('/v1/home/', [RouteResponseController::class, 'home']);//ok
-Route::get('/v2/home/', [RouteResponseController::class, 'home_v2']);//ok//Main API Problem//CDN_URL/S3_KEY/S3_SECRET
-Route::get('/v1/medicines/{search}/{page}/', [RouteResponseController::class, 'medicines']);//checked //Argument 1 passed error
+Route::get('/v2/home/', [RouteResponseController::class, 'home_v2']);//ok//not understanding elastic search
+Route::get('/v1/medicines/{search?}/{page?}/', [RouteResponseController::class, 'medicines']);//Ok without Elastic Search
 Route::get('/v1/sameGeneric/{g_id}/{page}/', [RouteResponseController::class, 'sameGeneric']);//OK// New Table field changed
 Route::get('/{version}/medicine/{m_id}/', [RouteResponseController::class, 'medicineSingle']);//checked//getMedicine error
 Route::get('/{version}/medicine/extra/{m_id}/', [RouteResponseController::class, 'medicineSingleExtra']);//ok//undefined //getMedicine()
@@ -50,7 +50,7 @@ Route::post('/v1/discount/check/', [RouteResponseController::class, 'dicountChec
 
 Route::get('/v1/checkout/initiated/', [RouteResponseController::class, 'checkoutInitiated']);//ok
 
-Route::post('/v1/order/add/', [RouteResponseController::class, 'orderAdd']);//
+Route::post('/v1/order/add/', [RouteResponseController::class, 'orderAdd']);//Modified
 Route::get('/v1/order/{o_id}/', [RouteResponseController::class, 'orderSingle']);//OK
 Route::get('/v1/invoice/{o_id}/{token}/', [RouteResponseController::class, 'invoice']);//Auth Check //Need to check Log
 Route::get('/v1/invoice/bag/{o_id}/{token}/', [RouteResponseController::class, 'invoiceBag']);//Auth Check

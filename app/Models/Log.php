@@ -34,7 +34,7 @@ class Log extends Model
         parent::boot();
 
         static::creating(function ($log) {
-            $log->u_id = Auth::id();
+            $log->u_id = Auth::id() ?? 0;
             $log->log_ip = $_SERVER['REMOTE_ADDR'];
             $log->log_ua = isset( $_SERVER['HTTP_USER_AGENT'] ) ?  filter_var( $_SERVER['HTTP_USER_AGENT'], FILTER_SANITIZE_STRING ) : '';
             $log->log_http_method = $_SERVER['REQUEST_METHOD'];

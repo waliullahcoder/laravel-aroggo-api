@@ -308,40 +308,6 @@ if (!function_exists('getS3Bucket')) {
     }
 }
 
-
-if (!function_exists('getS3Url')) {
-    function getS3Url($key, $width = '', $height = '', $watermark = false)
-    {
-        if (!$key) {
-            return '';
-        }
-        $edits = [];
-        if ($width && $height) {
-            $edits['resize'] = [
-                "width"  => $width,
-                "height" => $height,
-                "fit"    => "outside",
-            ];
-        }
-        if ($watermark) {
-            $edits['overlayWith'] = [
-                'bucket' => getS3Bucket(),
-                'key'    => 'misc/wm.png',
-                'alpha'  => 90,
-            ];
-        }
-        $s3_params = [
-            "bucket" => getS3Bucket(),
-            "key"    => $key,
-            "edits"  => $edits,
-        ];
-        $base64    = base64_encode(json_encode($s3_params));
-        //return CDN_URL . '/' . $base64;//old
-        return true . '/' . $base64;//me
-    }
-}
-
-
 if (!function_exists('getPicUrl')) {
     function getPicUrl($images)
     {
@@ -1347,7 +1313,7 @@ if (!function_exists('getS3Url')) {
             "edits"  => $edits,
         ];
         $base64    = base64_encode(json_encode($s3_params));
-        return CDN_URL . '/' . $base64;
+        return env('CDN_URL') . '/' . $base64;
     }
 }
 

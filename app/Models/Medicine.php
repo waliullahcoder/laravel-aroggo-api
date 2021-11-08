@@ -53,6 +53,9 @@ class Medicine extends Model
     public function genericV2(){
         return $this->belongsTo(GenericV2::class, 'm_g_id', 'g_id');
     }
+    public function company(){
+        return $this->belongsTo(Company::class, 'm_c_id', 'c_id');
+    }
 
     public function getMeta($key)
     {
@@ -118,7 +121,7 @@ class Medicine extends Model
         return isCold( $m_g_id );
     }
 
-    public function getMRxReqAttribute(){
+    public function getMRxReqAttribute($value){
         return (11 == $this->m_cat_id);
     }
 
@@ -234,34 +237,12 @@ class Medicine extends Model
     }
 
     public function getMPicUrlAttribute(){
-        $value = getPicUrl( $this->getMeta( 'images' ) );
+        return $value = getPicUrl( maybeJsonDecode($this->getMeta( 'images' )) );
     }
-
-
-
-    public static function getMedicine( $id ) {
-        if ( ! \is_numeric( $id ) ){
-            return false;
-        }
-        $id = \intval( $id );
-        if ( $id < 1 ){
-            return false;
-        }
-         $cache= new Cache();
-        if ( $medicine = $cache->get( $id, 'medicine' ) ){
-            return $medicine;
-        }
-        $medicine= Medicine::where('m_id', $id)->first();
-        if( $medicine){     
-            $cache->add( $medicine->m_id, $medicine, 'medicine' );
-            return $medicine;
-        } else {
-            return false;
-        }
+    public function getMGenericAttribute(){
+        return $this->genericV2->g_name ?? '';
     }
-
-
-
-
-
+    public function getMCompanyAttribute(){
+        return $this->company->c_name ?? '';
+    }
 }

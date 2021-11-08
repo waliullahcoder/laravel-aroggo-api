@@ -26,6 +26,13 @@ class Medicine
     private $index = 'arogga';
     private $params;
 
+    public static function init() {
+        if(!self::$instance instanceof self) {
+            self::$instance = new self;
+        }
+        return self::$instance;
+    }
+
     function __construct(){
         $this->client = ClientBuilder::create()->build();
         if( ! env('MAIN') ){

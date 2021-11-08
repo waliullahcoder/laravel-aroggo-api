@@ -154,7 +154,7 @@ class RouteResponseController extends Controller
         // }
         $deals = [];
         foreach ([27948, 27933, 27621, 27932, 27931, 27716, 27620, 27619, 28163, 28165, 28164, 27930] as $m_id) {
-            if ($medicine = Medicine::getMedicine($m_id)) {
+            if ($medicine = getMedicine($m_id)) {
                 $deals[] = [
                     'id' => $medicine->m_id,
                     'name' => $medicine->m_name,
@@ -195,7 +195,7 @@ class RouteResponseController extends Controller
             'havePic' => true,
             'm_rob' => true,
         ], $args );
-        $data = \OA\Search\Medicine::init()->search( $args );
+        $data = \App\Search\Medicine::init()->search( $args );
 
         if ( $data && $data['data'] ) {
             return $data['data'];
@@ -261,7 +261,7 @@ class RouteResponseController extends Controller
         */
 
         $carouselImgType = $from == 'web' ? 'attachedFilesWeb' : 'attachedFilesApp';
-        if ( ( $carouselImages = Option::get( $carouselImgType ) ) && is_array( $carouselImages ) ){
+        if ( ( $carouselImages = getOption( $carouselImgType ) ) && is_array( $carouselImages ) ){
             foreach ($carouselImages as $image){
                 if( $from == 'web' ){
                     $data[] = getS3Url( $image['s3key'], 2732, 500 );
@@ -315,8 +315,8 @@ class RouteResponseController extends Controller
     }
 
 
-    public function medicines(Request $request, $search = '', $page = 0 ) {
-        $this->medicinesES( $search, $page );
+    public function medicines($search = '', $page = 0, Request $request ) {
+//        $this->medicinesES( $search, $page, $request );
 
         if( ! $search ){
             $search = $request->search ? $request->search : '';
@@ -337,8 +337,8 @@ class RouteResponseController extends Controller
 
 
 
-        //$db->add( 'SELECT * FROM t_medicines WHERE 1=1' );
-        $query=DB::table('t_medicines')->get();
+
+        $query = Medicine::query();
         if ( $search ) {
             $search = preg_replace('/[^a-z0-9\040\.\-]+/i', ' ', $search);
 
@@ -353,34 +353,33 @@ class RouteResponseController extends Controller
                 $search = '+' . \str_replace( ' ', ' +', $search) . '*';
             }
             if( \strlen( $org_search ) > 2 ){
-                $query->where( " AND (MATCH(m_name) AGAINST (? IN BOOLEAN MODE) OR m_name LIKE ?)", $search, "{$org_search}%" );
+                $query->whereRaw( "(MATCH(m_name) AGAINST ( ? IN BOOLEAN MODE) OR m_name LIKE ?)", [$search, "$org_search%"] );
                 //$db->add( " AND MATCH(m_name) AGAINST (? IN BOOLEAN MODE)", $search );
             } elseif( $org_search ) {
-                $query->where( ' AND m_name LIKE ?', "{$org_search}%" );
+                $query->where( "m_name", 'LIKE', "$org_search%");
             }
         }
         if ( $cat_id ) {
-            $query->where( ' AND m_cat_id = ?', $cat_id );
+            $query->where( "m_cat_id", "=", $cat_id );
         }
         if( $category ) {
-            $query->where( ' AND m_category = ?', $category );
+            $query->where( "m_category", "=", $category );
         }
-        $query->where( ' AND m_status = ?', 'active' );
-        $query->where( ' ORDER BY m_rob DESC, m_category, m_name, m_form DESC, m_strength, m_unit LIMIT ?, ?', $limit, $per_page );
-        
-        $cache_key = \md5( $db->getSql() . \json_encode($db->getParams()) );
+        $query->where( "m_status", "=", "active" );
+        $query->orderByRaw( 'm_rob DESC, m_category, m_name, m_form DESC, m_strength, m_unit');
+        $query->offset($limit);
+        $query->limit($per_page);
+        $cache_key = \md5( $query->toSql() . json_encode($query->getBindings()));
+//        dd($query->toSql());
         $cache= new Cache();
-        if ( $cache_data = $cache->get( $cache_key, 'userMedicines' ) ){
-            return response()->json([
-                'status'=>'success',
-                'total'=>$cache_data['data']
-            ]);
+        if ( $cache_data =$cache->get( $cache_key, 'userMedicines' ) ){
+            Response::instance()->setData( $cache_data['data'] );
+            //Response::instance()->setResponse( 'total', $cache_data['total'] );
+            Response::instance()->setStatus( 'success' );
+            Response::instance()->send();
         }
-
-        $query = $db->execute();
-        $query->setFetchMode( \PDO::FETCH_CLASS, '\OA\Factory\Medicine');
-
-        while( $medicine = $query->fetch() ){
+        $medicines = $query->get();
+        foreach( $medicines as $medicine ){
             $data = [
                 'id' => $medicine->m_id,
                 'name' => $medicine->m_name,
@@ -396,12 +395,10 @@ class RouteResponseController extends Controller
                 'price' => $medicine->m_price,
                 'd_price' => $medicine->m_d_price,
             ];
-            return response()->json([
-                'status'=>'success',
-                'data'=>$data
-            ]);
+            Response::instance()->appendData( '', $data );
         }
         if ( $all_data = Response::instance()->getData() ) {
+            dd($all_data);
             $cache_data = [
                 'data' => $all_data,
                 //'total' => $total,
@@ -410,17 +407,18 @@ class RouteResponseController extends Controller
             $cache->set( $cache_key, $cache_data, 'userMedicines', 60 * 60 );
 
             //Response::instance()->setResponse( 'total', $total );
-            return response()->json('success'); 
+            Response::instance()->setStatus( 'success' );
+            Response::instance()->send();
         } else {
             if( $page > 1 ){
-                return response()->json('No more medicines Found' );
+                Response::instance()->sendMessage( 'No more medicines Found' );
             } else {
-                return response()->json('No medicines Found' );
+                Response::instance()->sendMessage( 'No medicines Found' );
             }
         }
     }
 
-    function medicinesES(Request $request, $q = '', $page = 0) {
+    function medicinesES($q = '', $page = 0, Request $request) {
         $from = $request->f ? preg_replace("/[^a-zA-Z0-9]+/", "", $request->f) : 'app';
         if( ! $q ){
             $q = $request->search ? $request->search : '';
@@ -452,7 +450,7 @@ class RouteResponseController extends Controller
             'm_cat_id' => $cat_id,
             'havePic' => $havePic,
         ];
-        $data = Medicine::init()->search( $args );
+        $data = \App\Search\Medicine::init()->search( $args );
 
         if ( $data && $data['data'] ) {
             return response()->json([
@@ -846,288 +844,288 @@ class RouteResponseController extends Controller
         ]);
     }
 
-    // function orderAdd(Request $request) {
-    //     //Response::instance()->sendMessage( "ঈদ মোবারক! ঈদের ছুটিতে ফার্মাসিউটিক্যাল কোম্পানিগুলো বন্ধ থাকায় সম্মানিত গ্রাহকদের অর্ডার ডেলিভারি বিলম্বিত হচ্ছে।\nতাই ১১-১৫ তারিখ পর্যন্ত আমরা অর্ডার নেওয়া বন্ধ রাখছি।\nসম্মানিত গ্রাহকদের সাময়িক এই অসুবিধার জন্য আমরা আন্তরিকভাবে দুঃখিত। আনন্দে কাটুক সবার ঈদ।");
-    //     //Response::instance()->sendMessage( "Dear valued clients.\nOur Dhaka city operation will resume from 29th November 2020.\nThanks for being with Arogga.");
-    //     //Response::instance()->sendMessage( "Due to some unavoidable circumstances we cannot take orders now. We will send you a notification once we start taking orders.\nSorry for this inconvenience.");
-    //     //Response::instance()->sendMessage( "Due to covid19 outbreak, there is a severe short supply of medicine.\nUntil regular supply of medicine resumes, we may not take anymore orders.\nSorry for this inconvenience.");
-    //     //Response::instance()->sendMessage( "Due to Software maintainance we cannot receive orders now.\nPls try after 24 hours. We will be back!!");
-    //     //Response::instance()->sendMessage( "Due to Software maintainance we cannot receive orders now.\nPlease try again after 2nd Jun, 11PM. We will be back!!");
-    //     //Response::instance()->sendMessage( "Due to recent coronavirus outbreak, we are facing delivery man shortage.\nOnce our delivery channel is optimised, we may resume taking your orders.\nThanks for your understanding.");
-    //     //Response::instance()->sendMessage( "Due to EID holiday we cannot receive orders now.\nPlease try again after EID. We will be back!!");
-    //     //Response::instance()->sendMessage( "Due to EID holiday we cannot receive orders now.\nPlease try again after 28th May, 10PM. We will be back!!");
+    function orderAdd(Request $request) {
+        //Response::instance()->sendMessage( "ঈদ মোবারক! ঈদের ছুটিতে ফার্মাসিউটিক্যাল কোম্পানিগুলো বন্ধ থাকায় সম্মানিত গ্রাহকদের অর্ডার ডেলিভারি বিলম্বিত হচ্ছে।\nতাই ১১-১৫ তারিখ পর্যন্ত আমরা অর্ডার নেওয়া বন্ধ রাখছি।\nসম্মানিত গ্রাহকদের সাময়িক এই অসুবিধার জন্য আমরা আন্তরিকভাবে দুঃখিত। আনন্দে কাটুক সবার ঈদ।");
+        //Response::instance()->sendMessage( "Dear valued clients.\nOur Dhaka city operation will resume from 29th November 2020.\nThanks for being with Arogga.");
+        //Response::instance()->sendMessage( "Due to some unavoidable circumstances we cannot take orders now. We will send you a notification once we start taking orders.\nSorry for this inconvenience.");
+        //Response::instance()->sendMessage( "Due to covid19 outbreak, there is a severe short supply of medicine.\nUntil regular supply of medicine resumes, we may not take anymore orders.\nSorry for this inconvenience.");
+        //Response::instance()->sendMessage( "Due to Software maintainance we cannot receive orders now.\nPls try after 24 hours. We will be back!!");
+        //Response::instance()->sendMessage( "Due to Software maintainance we cannot receive orders now.\nPlease try again after 2nd Jun, 11PM. We will be back!!");
+        //Response::instance()->sendMessage( "Due to recent coronavirus outbreak, we are facing delivery man shortage.\nOnce our delivery channel is optimised, we may resume taking your orders.\nThanks for your understanding.");
+        //Response::instance()->sendMessage( "Due to EID holiday we cannot receive orders now.\nPlease try again after EID. We will be back!!");
+        //Response::instance()->sendMessage( "Due to EID holiday we cannot receive orders now.\nPlease try again after 28th May, 10PM. We will be back!!");
 
-    //     $from = isset( $_GET['f'] ) ? preg_replace("/[^a-zA-Z0-9]+/", "",$_GET['f']) : 'app';
-    //     $medicines = $request->medicines && is_array( $request->medicines ) ?  $request->medicines : [];
-    //     $d_code = $request->d_code ?  $request->d_code : '';
-    //     $prescriptions = $request->prescriptions ? $request->prescriptions : [];
-    //     $prescriptionKeys = $request->prescriptionKeys && is_array( $request->prescriptionKeys ) ?  $request->prescriptionKeys : [];
+        $from = isset( $_GET['f'] ) ? preg_replace("/[^a-zA-Z0-9]+/", "",$_GET['f']) : 'app';
+        $medicines = $request->medicines && is_array( $request->medicines ) ?  $request->medicines : [];
+        $d_code = $request->d_code ?  $request->d_code : '';
+        $prescriptions = $request->prescriptions ? $request->prescriptions : [];
+        $prescriptionKeys = $request->prescriptionKeys && is_array( $request->prescriptionKeys ) ?  $request->prescriptionKeys : [];
 
-    //     $name = $request->name ? $request->name : '';
-    //     $mobile = $request->mobile ?  $request->mobile : '';
-    //     $address = $request->address ?  $request->address : '';
-    //     $lat = $request->lat ?  $request->lat : '';
-    //     $long = $request->long ?  $request->long : '';
-    //     $gps_address = $request->gps_address ?  $request->gps_address : '';
-    //     $s_address = $request->s_address && is_array($request->s_address )? $request->s_address: [];
-    //     $monthly = !empty( $request->monthly ) ?  1 : 0;
-    //     $payment_method = $request->payment_method && in_array($request->payment_method, ['cod', 'online']) ? $request->payment_method : 'cod';
+        $name = $request->name ? $request->name : '';
+        $mobile = $request->mobile ?  $request->mobile : '';
+        $address = $request->address ?  $request->address : '';
+        $lat = $request->lat ?  $request->lat : '';
+        $long = $request->long ?  $request->long : '';
+        $gps_address = $request->gps_address ?  $request->gps_address : '';
+        $s_address = $request->s_address && is_array($request->s_address )? $request->s_address: [];
+        $monthly = !empty( $request->monthly ) ?  1 : 0;
+        $payment_method = $request->payment_method && in_array($request->payment_method, ['cod', 'online']) ? $request->payment_method : 'cod';
 
-    //     if ( ! $name || ! $mobile ){
-    //         return response()->json( 'name and mobile are required.');
-    //     }
-    //     $lat = $long = '';
+        if ( ! $name || ! $mobile ){
+            return response()->json( 'name and mobile are required.');
+        }
+        $lat = $long = '';
 
-    //     if ( ! $address && ( ! $lat || ! $long ) && ! $s_address ){
-    //         return response()->json( 'Address is required.');
-    //     }
+        if ( ! $address && ( ! $lat || ! $long ) && ! $s_address ){
+            return response()->json( 'Address is required.');
+        }
 
-    //     if ( $s_address && ! isLocationValid( @$s_address['division'], @$s_address['district'], @$s_address['area'] ) ){
-    //         return response()->json( 'invalid location.');
-    //     }
+        if ( $s_address && ! isLocationValid( @$s_address['division'], @$s_address['district'], @$s_address['area'] ) ){
+            return response()->json( 'invalid location.');
+        }
 
-    //     /*
-    //     if ( $lat && $long ){
-    //         if( Functions::isInside( $lat, $long, 'chittagong' ) ){
-    //             Response::instance()->sendMessage( "Our Chattogram operation temporarily off due to some unavoidable circumstances. We will send you a notification once our Chattogram operation resumes.\nSorry for this inconvenience.");
-    //         }
-    //         if( ! Functions::isInside( $lat, $long ) ){
-    //             Response::instance()->sendMessage( "Our delivery service comming to this area very soon, please stay with us.");
-    //         }
-    //     }
-    //     */
-    //     if ( ! $medicines && ! $prescriptions && !$prescriptionKeys ){
-    //         return response()->json( 'medicines or prescription are required.');
-    //     }
-    //     if ( $medicines && ! is_array( $medicines ) ){
-    //         return response()->json( 'medicines need to be an array with m_id as key and quantity as value.');
-    //     }
-    //     if ( $prescriptions && ! is_array( $prescriptions ) ){
-    //         return response()->json( 'prescription need to be an file array.');
-    //     }
+        /*
+        if ( $lat && $long ){
+            if( Functions::isInside( $lat, $long, 'chittagong' ) ){
+                Response::instance()->sendMessage( "Our Chattogram operation temporarily off due to some unavoidable circumstances. We will send you a notification once our Chattogram operation resumes.\nSorry for this inconvenience.");
+            }
+            if( ! Functions::isInside( $lat, $long ) ){
+                Response::instance()->sendMessage( "Our delivery service comming to this area very soon, please stay with us.");
+            }
+        }
+        */
+        if ( ! $medicines && ! $prescriptions && !$prescriptionKeys ){
+            return response()->json( 'medicines or prescription are required.');
+        }
+        if ( $medicines && ! is_array( $medicines ) ){
+            return response()->json( 'medicines need to be an array with m_id as key and quantity as value.');
+        }
+        if ( $prescriptions && ! is_array( $prescriptions ) ){
+            return response()->json( 'prescription need to be an file array.');
+        }
 
-    //     if ( ! (Auth::id())) {
-    //         return response()->json([
-    //             'loginRequired'=>true,
-    //             'message'=>'Invalid id token',
-    //         ]);
-    //     }
-    //     $user= User::where('u_id', Auth::id())->get();
-    //     if ( 'blocked' == $user->u_status ){
-    //         return response()->json( 'You are blocked. Please contact customer care.');
-    //     }
-    //     if ( 'user' !== $user->u_role ){
-    //         return response()->json( 'You cannot make order using this number.');
-    //     }
-    //     // $order_check = DB::db()->prepare( 'SELECT COUNT(*) FROM t_orders WHERE u_id = ? AND o_status = ?' );
-    //     // $order_check->execute( [ Auth::id(), 'processing' ] );
-    //     $order_check= Order::where('u_id', Auth::id())->where('o_status', '=', 'processing')->get()->count();
-    //     if( $order_check >= 3  ){
-    //         return response()->json( 'Please wait until your current orders are confirmed. After that you can submit another order OR call customer care if you need further assistance.');
-    //     }
-    //     $discount = Discount::getDiscount( $d_code );
+        if ( ! (Auth::id())) {
+            return response()->json([
+                'loginRequired'=>true,
+                'message'=>'Invalid id token',
+            ]);
+        }
+        $user= User::where('u_id', Auth::id())->get();
+        if ( 'blocked' == $user->u_status ){
+            return response()->json( 'You are blocked. Please contact customer care.');
+        }
+        if ( 'user' !== $user->u_role ){
+            return response()->json( 'You cannot make order using this number.');
+        }
+        // $order_check = DB::db()->prepare( 'SELECT COUNT(*) FROM t_orders WHERE u_id = ? AND o_status = ?' );
+        // $order_check->execute( [ Auth::id(), 'processing' ] );
+        $order_check= Order::where('u_id', Auth::id())->where('o_status', '=', 'processing')->get()->count();
+        if( $order_check >= 3  ){
+            return response()->json( 'Please wait until your current orders are confirmed. After that you can submit another order OR call customer care if you need further assistance.');
+        }
+        $discount = Discount::getDiscount( $d_code );
 
-    //     if( ! $discount || ! $discount->canUserUse( $user->u_id ) ) {
-    //         $d_code = '';
-    //     }
-    //     if ( $name && !$user->u_name ) {
-    //         $user->u_name = $name;
-    //     }
-    //     if ( ! $user->u_mobile && $mobile ) {
-    //         $m_user = $user->u_mobile;//User::getBy( 'u_mobile', $mobile );
-    //         if ( $m_user ) {
-    //             return response()->json( 'Sorry for this but this number is already registered with another account. Please sign in with that account if it is you or login with your own phone number.');
-    //         } else {
-    //             $user->u_mobile = $mobile;
-    //         }
-    //     }
-    //     if ( $lat && $user->u_lat != $lat ) {
-    //         $user->u_lat = $lat;
-    //     }
-    //     if ( $long &&  $user->u_long != $long ) {
-    //         $user->u_long = $long;
-    //     }
+        if( ! $discount || ! $discount->canUserUse( $user->u_id ) ) {
+            $d_code = '';
+        }
+        if ( $name && !$user->u_name ) {
+            $user->u_name = $name;
+        }
+        if ( ! $user->u_mobile && $mobile ) {
+            $m_user = $user->u_mobile;//User::getBy( 'u_mobile', $mobile );
+            if ( $m_user ) {
+                return response()->json( 'Sorry for this but this number is already registered with another account. Please sign in with that account if it is you or login with your own phone number.');
+            } else {
+                $user->u_mobile = $mobile;
+            }
+        }
+        if ( $lat && $user->u_lat != $lat ) {
+            $user->u_lat = $lat;
+        }
+        if ( $long &&  $user->u_long != $long ) {
+            $user->u_long = $long;
+        }
 
-    //     $files_to_save = [];
-    //     if ( $prescriptions ) {
-    //         if ( empty( $prescriptions['tmp_name'] ) || ! is_array( $prescriptions['tmp_name'] ) ) {
-    //             return response()->json( 'prescription need to be an file array.');
-    //         }
-    //         if ( count( $prescriptions['tmp_name'] ) > 5 ) {
-    //             return response()->json( 'Maximum 5 prescription pictures allowed.');
-    //         }
-    //         $i = count( $prescriptionKeys ) ?: 1;
-    //         foreach( $prescriptions['tmp_name'] as $key => $tmp_name ) {
-    //             if( $i > 5 ){
-    //                 break;
-    //             }
-    //             if( ! $tmp_name ) {
-    //                 continue;
-    //             }
-    //             if ( UPLOAD_ERR_OK !== $prescriptions['error'][$key] ) {
-    //                 return response()->json( \sprintf('Upload error occured when upload %s. Please try again', \strip_tags( $prescriptions['name'][$key] ) ) );
-    //             }
-    //             $size = \filesize( $tmp_name );
-    //             if( $size < 12 ) {
-    //                 return response()->json( \sprintf('File %s is too small.', \strip_tags( $prescriptions['name'][$key] ) ) );
-    //             } elseif ( $size > 10 * 1024 * 1024 ) {
-    //                 return response()->json( \sprintf('File %s is too big. Maximum size is 10MB.', \strip_tags( $prescriptions['name'][$key] ) ) );
-    //             }
-    //             $imagetype = exif_imagetype( $tmp_name );
-    //             $mime      = ( $imagetype ) ? image_type_to_mime_type( $imagetype ) : false;
-    //             $ext       = ( $imagetype ) ? image_type_to_extension( $imagetype ) : false;
-    //             if( ! $ext || ! $mime ) {
-    //                 return response()->json( 'Only prescription pictures are allowed.');
-    //             }
-    //             $files_to_save[ $tmp_name ] = ['name' => $i++ . randToken( 'alnumlc', 12 ) . $ext, 'mime' => $mime ];
-    //         }
-    //     }
+        $files_to_save = [];
+        if ( $prescriptions ) {
+            if ( empty( $prescriptions['tmp_name'] ) || ! is_array( $prescriptions['tmp_name'] ) ) {
+                return response()->json( 'prescription need to be an file array.');
+            }
+            if ( count( $prescriptions['tmp_name'] ) > 5 ) {
+                return response()->json( 'Maximum 5 prescription pictures allowed.');
+            }
+            $i = count( $prescriptionKeys ) ?: 1;
+            foreach( $prescriptions['tmp_name'] as $key => $tmp_name ) {
+                if( $i > 5 ){
+                    break;
+                }
+                if( ! $tmp_name ) {
+                    continue;
+                }
+                if ( UPLOAD_ERR_OK !== $prescriptions['error'][$key] ) {
+                    return response()->json( \sprintf('Upload error occured when upload %s. Please try again', \strip_tags( $prescriptions['name'][$key] ) ) );
+                }
+                $size = \filesize( $tmp_name );
+                if( $size < 12 ) {
+                    return response()->json( \sprintf('File %s is too small.', \strip_tags( $prescriptions['name'][$key] ) ) );
+                } elseif ( $size > 10 * 1024 * 1024 ) {
+                    return response()->json( \sprintf('File %s is too big. Maximum size is 10MB.', \strip_tags( $prescriptions['name'][$key] ) ) );
+                }
+                $imagetype = exif_imagetype( $tmp_name );
+                $mime      = ( $imagetype ) ? image_type_to_mime_type( $imagetype ) : false;
+                $ext       = ( $imagetype ) ? image_type_to_extension( $imagetype ) : false;
+                if( ! $ext || ! $mime ) {
+                    return response()->json( 'Only prescription pictures are allowed.');
+                }
+                $files_to_save[ $tmp_name ] = ['name' => $i++ . randToken( 'alnumlc', 12 ) . $ext, 'mime' => $mime ];
+            }
+        }
 
-    //     $cart_data = cartData( $user, $medicines, $d_code, null, false, ['s_address' => $s_address] );
-    //     if ( ! empty( $cart_data['rx_req'] ) && ! $files_to_save ) {
-    //         return response()->json( 'Rx required.');
-    //     }
-    //     if( isset($cart_data['deductions']['cash']) && !empty($cart_data['deductions']['cash']['info'])) {
-    //         $cart_data['deductions']['cash']['info'] = "Didn't apply because the order value was less than ৳499.";
-    //     }
-    //     if( isset($cart_data['additions']['delivery']) && !empty($cart_data['additions']['delivery']['info'])) {
-    //         $cart_data['additions']['delivery']['info'] = str_replace('To get free delivery order more than', 'Because the order value was less than', $cart_data['additions']['delivery']['info']);
-    //     }
-    //     $c_medicines = $cart_data['medicines'];
-    //     unset( $cart_data['medicines'] );
+        $cart_data = cartData( $user, $medicines, $d_code, null, false, ['s_address' => $s_address] );
+        if ( ! empty( $cart_data['rx_req'] ) && ! $files_to_save ) {
+            return response()->json( 'Rx required.');
+        }
+        if( isset($cart_data['deductions']['cash']) && !empty($cart_data['deductions']['cash']['info'])) {
+            $cart_data['deductions']['cash']['info'] = "Didn't apply because the order value was less than ৳499.";
+        }
+        if( isset($cart_data['additions']['delivery']) && !empty($cart_data['additions']['delivery']['info'])) {
+            $cart_data['additions']['delivery']['info'] = str_replace('To get free delivery order more than', 'Because the order value was less than', $cart_data['additions']['delivery']['info']);
+        }
+        $c_medicines = $cart_data['medicines'];
+        unset( $cart_data['medicines'] );
 
-    //     $order = new Order;
-    //     $order->u_id = $user->u_id;
-    //     $order->u_name = $user->u_name;
-    //     $order->u_mobile = $user->u_mobile;
-    //     $order->o_subtotal = $cart_data['subtotal'];
-    //     $order->o_addition = $cart_data['a_amount'];
-    //     $order->o_deduction = $cart_data['d_amount'];
-    //     $order->o_total = $cart_data['total'];
-    //     $order->o_status = 'processing';
-    //     $order->o_i_status = 'processing';
-    //     $order->o_address = $address;
-    //     $order->o_gps_address = $gps_address;
-    //     $order->o_lat = $lat;
-    //     $order->o_long = $long;
-    //     $order->o_payment_method = $payment_method;
+        $order = new Order;
+        $order->u_id = $user->u_id;
+        $order->u_name = $user->u_name;
+        $order->u_mobile = $user->u_mobile;
+        $order->o_subtotal = $cart_data['subtotal'];
+        $order->o_addition = $cart_data['a_amount'];
+        $order->o_deduction = $cart_data['d_amount'];
+        $order->o_total = $cart_data['total'];
+        $order->o_status = 'processing';
+        $order->o_i_status = 'processing';
+        $order->o_address = $address;
+        $order->o_gps_address = $gps_address;
+        $order->o_lat = $lat;
+        $order->o_long = $long;
+        $order->o_payment_method = $payment_method;
 
-    //     /*
-    //     if( $p_id = $this->closest( 'pharmacy', $lat, $long ) ) {
-    //         $order->o_ph_id = $p_id;
-    //     }
-    //     */
-    //     //Currently we have only one pharmacy
-    //     $order->o_ph_id = 6139;
+        /*
+        if( $p_id = $this->closest( 'pharmacy', $lat, $long ) ) {
+            $order->o_ph_id = $p_id;
+        }
+        */
+        //Currently we have only one pharmacy
+        $order->o_ph_id = 6139;
 
-    //     if( !isset( $s_address['district'] ) ){
-    //         if( $d_id = $this->closest( 'delivery', $lat, $long ) ){
-    //             $order->o_de_id = $d_id;
-    //         }
-    //     } elseif( $s_address['district'] != 'Dhaka City' ){
-    //         //Outside Dhaka delivery ID
-    //         $order->o_de_id = 143;
-    //         $order->o_payment_method = 'online';
-    //     } elseif( $d_id = getIdByLocation( 'l_de_id', $s_address['division'], $s_address['district'], $s_address['area'] ) ) {
-    //         $order->o_de_id = $d_id;
-    //     }
-    //     if( isset( $s_address['district'] ) ){
-    //         $order->o_l_id = getIdByLocation( 'l_id', $s_address['division'], $s_address['district'], $s_address['area'] );
-    //     }
-    //     $user->update();
-    //     $order->insert();
-    //     Functions::ModifyOrderMedicines( $order, $c_medicines );
-    //     $meta = [
-    //         'o_data' => $cart_data,
-    //         'o_secret' => randToken( 'alnumlc', 16 ),
-    //         's_address' => $s_address,
-    //         'from' => $from,
-    //     ];
-    //     if( $d_code ) {
-    //         $meta['d_code'] = $d_code;
-    //     }
-    //     if( $monthly ) {
-    //         $meta['subscriptionFreq'] = 'monthly';
-    //     }
+        if( !isset( $s_address['district'] ) ){
+            if( $d_id = $this->closest( 'delivery', $lat, $long ) ){
+                $order->o_de_id = $d_id;
+            }
+        } elseif( $s_address['district'] != 'Dhaka City' ){
+            //Outside Dhaka delivery ID
+            $order->o_de_id = 143;
+            $order->o_payment_method = 'online';
+        } elseif( $d_id = getIdByLocation( 'l_de_id', $s_address['division'], $s_address['district'], $s_address['area'] ) ) {
+            $order->o_de_id = $d_id;
+        }
+        if( isset( $s_address['district'] ) ){
+            $order->o_l_id = getIdByLocation( 'l_id', $s_address['division'], $s_address['district'], $s_address['area'] );
+        }
+        $user->update();
+        $order->insert();
+        ModifyOrderMedicines( $order, $c_medicines );
+        $meta = [
+            'o_data' => $cart_data,
+            'o_secret' => randToken( 'alnumlc', 16 ),
+            's_address' => $s_address,
+            'from' => $from,
+        ];
+        if( $d_code ) {
+            $meta['d_code'] = $d_code;
+        }
+        if( $monthly ) {
+            $meta['subscriptionFreq'] = 'monthly';
+        }
 
-    //     $imgArray = [];
-    //     if ( $files_to_save ) {
-    //         $upload_folder = STATIC_DIR . '/orders/' . \floor( $order->o_id / 1000 );
+        $imgArray = [];
+        if ( $files_to_save ) {
+            $upload_folder = STATIC_DIR . '/orders/' . \floor( $order->o_id / 1000 );
 
-    //         if ( ! is_dir($upload_folder)) {
-    //             @mkdir($upload_folder, 0755, true);
-    //         }
+            if ( ! is_dir($upload_folder)) {
+                @mkdir($upload_folder, 0755, true);
+            }
 
-    //         foreach ( $files_to_save as $tmp_name => $file ) {
-    //             $fileName = \sprintf( '%s-%s', $order->o_id, $file['name'] );
-    //             $s3key = Functions::uploadToS3( $order->o_id, $tmp_name, 'order', $fileName, $file['mime'] );
-    //             if ( $s3key ){
-    //                 array_push( $imgArray, $s3key );
-    //             }
-    //         }
-    //         if ( count($imgArray) ){
-    //             $oldMeta = $user->getMeta( 'prescriptions' );
-    //             $user->setMeta( 'prescriptions', ( $oldMeta && is_array($oldMeta ) ) ? array_merge( $oldMeta, $imgArray ) : $imgArray );
-    //        }
-    //     }
-    //     if( $prescriptionKeys ){
-    //         $oldMeta = $user->getMeta( 'prescriptions' );
+            foreach ( $files_to_save as $tmp_name => $file ) {
+                $fileName = \sprintf( '%s-%s', $order->o_id, $file['name'] );
+                $s3key = uploadToS3( $order->o_id, $tmp_name, 'order', $fileName, $file['mime'] );
+                if ( $s3key ){
+                    array_push( $imgArray, $s3key );
+                }
+            }
+            if ( count($imgArray) ){
+                $oldMeta = $user->getMeta( 'prescriptions' );
+                $user->setMeta( 'prescriptions', ( $oldMeta && is_array($oldMeta ) ) ? array_merge( $oldMeta, $imgArray ) : $imgArray );
+           }
+        }
+        if( $prescriptionKeys ){
+            $oldMeta = $user->getMeta( 'prescriptions' );
 
-    //         foreach ( $prescriptionKeys as $prescriptionKey ) {
-    //             if( !$prescriptionKey || !$oldMeta || !in_array( $prescriptionKey, $oldMeta ) ){
-    //                 continue;
-    //             }
-    //             $imgNameArray = explode( '-', $prescriptionKey );
-    //             $imgName = end( $imgNameArray );
+            foreach ( $prescriptionKeys as $prescriptionKey ) {
+                if( !$prescriptionKey || !$oldMeta || !in_array( $prescriptionKey, $oldMeta ) ){
+                    continue;
+                }
+                $imgNameArray = explode( '-', $prescriptionKey );
+                $imgName = end( $imgNameArray );
 
-    //             $fileName = \sprintf( '%s-%s', $order->o_id, $imgName );
-    //             $s3key = Functions::uploadToS3( $order->o_id, '', 'order', $fileName, '', $prescriptionKey );
-    //             if ( $s3key ){
-    //                 array_push( $imgArray, $s3key );
-    //             }
-    //         }
-    //     }
-    //     if ( count($imgArray) ){
-    //          $meta['prescriptions'] = $imgArray;
-    //     }
+                $fileName = \sprintf( '%s-%s', $order->o_id, $imgName );
+                $s3key = uploadToS3( $order->o_id, '', 'order', $fileName, '', $prescriptionKey );
+                if ( $s3key ){
+                    array_push( $imgArray, $s3key );
+                }
+            }
+        }
+        if ( count($imgArray) ){
+             $meta['prescriptions'] = $imgArray;
+        }
 
-    //     $order->insertMetas( $meta );
-    //     $order->addHistory( 'Created', sprintf( 'Created through %s', $from ) );
-    //     //Get user again, User data may changed
-    //     $user = User::getUser( Auth::id() );
-	// 	$cash_back = $order->cashBackAmount();
+        $order->insertMetas( $meta );
+        $order->addHistory( 'Created', sprintf( 'Created through %s', $from ) );
+        //Get user again, User data may changed
+        $user = User::getUser( Auth::id() );
+		$cash_back = $order->cashBackAmount();
 
-    //     $message = 'Order added successfully.';
-    //     if ( !$medicines && $files_to_save ) {
-    //         $message = "Thank you for submitting prescription. You will receive a call shortly from our representatives.\nNote: Depending on the order value,  you may receive cashback from arogga.";
-    //     } else {
-    //         if ( $cash_back ) {
-    //             $user->u_p_cash = $user->u_p_cash + $cash_back;
-    //             $message = "Congratulations!!! You have received a cashback of ৳{$cash_back} from arogga. The cashback will be automatically applied at your next order.";
-    //             Functions::sendNotification( $user->fcm_token, 'Cashback Received.', $message );
-    //         }
-    //     }
+        $message = 'Order added successfully.';
+        if ( !$medicines && $files_to_save ) {
+            $message = "Thank you for submitting prescription. You will receive a call shortly from our representatives.\nNote: Depending on the order value,  you may receive cashback from arogga.";
+        } else {
+            if ( $cash_back ) {
+                $user->u_p_cash = $user->u_p_cash + $cash_back;
+                $message = "Congratulations!!! You have received a cashback of ৳{$cash_back} from arogga. The cashback will be automatically applied at your next order.";
+                sendNotification( $user->fcm_token, 'Cashback Received.', $message );
+            }
+        }
         
-    //     if( isset($cart_data['deductions']['cash']) ){
-    //         $user->u_cash = $user->u_cash - $cart_data['deductions']['cash']['amount'];
-    //     }
+        if( isset($cart_data['deductions']['cash']) ){
+            $user->u_cash = $user->u_cash - $cart_data['deductions']['cash']['amount'];
+        }
 
-    //     $user->update();
-    //     $u_data = $user->toArray();
-    //     $u_data['authToken'] = $user->authToken();
+        $user->update();
+        $u_data = $user->toArray();
+        $u_data['authToken'] = $user->authToken();
 
-    //     $o_data = [
-    //         'o_id' => $order->o_id,
-    //     ];
+        $o_data = [
+            'o_id' => $order->o_id,
+        ];
 
-    //     return response()->json([
-    //        'status'=>'success',
-    //        'message'=>$message,
-    //        'user'=>$u_data,
-    //        'order'=>$o_data,
-    //     ]);
+        return response()->json([
+           'status'=>'success',
+           'message'=>$message,
+           'user'=>$u_data,
+           'order'=>$o_data,
+        ]);
 
-    // }
+    }
 
 
     public function orderSingle( $o_id ) {
